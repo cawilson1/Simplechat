@@ -7,34 +7,36 @@
 #include<stdlib.h>
 #include<sys/param.h>
 
-#define SERVER_PORT 8017
+#define SERVER_PORT 9025
 #define MAX_LINE 256
 
 struct packet{
 	short type;
-	char* uname;//manually check that this and two below are no greater than MAX_LINE in size
-	char* mname;
-	char* data;
+	char uname[MAX_LINE];
+	char mname[MAX_LINE];
+	char data[MAX_LINE];
 };	
 
 
 int main(int argc, char* argv[])
 {
 
-	struct packet packet_reg;
+	struct packet registrationPacket, confirmationPacket, chatDataPacket, chatResponsePacket;
 
 	struct hostent *hp;
 	struct sockaddr_in sin;
 	char *host;
-	char myMachineName[MAXHOSTNAMELEN];
+	char myMachineName[MAX_LINE];
 	char buf[MAX_LINE];
+	char arg2Username[MAX_LINE];
+
 	int s;
 	int len;
 
-	fprintf(stdout,"argc is %d\n", argc); 
 	if(argc == 3){
+		printf("-----------------New Chat Initiated--------------------\n");
 		host = argv[1];
-		packet_reg.uname=argv[2];//strcpy causes segmentation fault
+		strcpy(arg2Username,argv[2]);
 	}
 	else{
 		fprintf(stderr, "incorrect argument count\n");
@@ -55,16 +57,15 @@ int main(int argc, char* argv[])
 
 	//create registration packet from command line args
 	//packet type
-	packet_reg.type = htons(121);
+	registrationPacket.type = htons(121);
 	//set packet machine name
-	strcpy(packet_reg.mname, myMachineName);	
-	//packet_reg.mname = myhostname;
+	strncpy(registrationPacket.mname, myMachineName, sizeof(myMachineName));
+	//set packet username
+	strncpy(registrationPacket.uname, arg2Username, sizeof(arg2Username));	
+	//registrationPacket.mname = myhostname;
 
 	printf("Username: ");
-	printf(packet_reg.uname);
-	printf("\nINFO: \n");
-	printf("%u\n", ntohs(packet_reg.type));
-	printf(packet_reg.mname);
+	printf(registrationPacket.uname);
 
 	/* active open */
 	if((s = socket(PF_INET, SOCK_STREAM, 0)) < 0){
@@ -84,21 +85,65 @@ int main(int argc, char* argv[])
 		close(s);
 		exit(1);
 	}
-	/* main loop: get and send lines of text */
-	while(fgets(buf, sizeof(buf), stdin)){
-		//send the registration packet to the server
-		if(send(s, &packet_reg, sizeof(packet_reg), 0) < 0)
-		{
-			printf("\nSend failed\n");
+
+	//send the registration packet to the server
+	if(send(s, &registrationPacket, sizeof(registrationPacket), 0) < 0)
+	{
+		printf("\nSend failed\n");
+		exit(1);
+	}
+	//registration packet sent without error
+	else{
+		printf("\nSent packet %u registration packet ", ntohs(registrationPacket.type)); 
+		printf("\n-----------------------------------------------------\n");
+		//receive confirmation packet
+		if(recv(s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
+			printf("\ndidn't receive confirmation packet");
 			exit(1);
 		}
+		//confirmation packet received without error
 		else{
-			printf("%u", ntohs(packet_reg.type));	
-		}	
+			printf("\n\nConfirmation packet %u recieved successfully from server for", ntohs(confirmationPacket.type));
+			printf(" user %s\n", confirmationPacket.uname);
+
+			//loop to receive input to send the chat data packet to the server
+			while(fgets(buf, sizeof(buf),stdin)){
+				buf[MAX_LINE-1] = '\0';
+				len = strlen(buf) + 1;
+				chatDataPacket.type = htons(131);
+				strncpy(chatDataPacket.uname,confirmationPacket.uname,sizeof(confirmationPacket.uname));
+				strncpy(chatDataPacket.data,buf,len);
+				//send chat data packet
+				if(send(s, &chatDataPacket,sizeof(chatDataPacket),0) < 0){
+					printf("\nchat data packet error");
+					exit(1);
+				}
+				//chat packet sent successfully
+				else{
+					printf("Chat data packet %u sent successfully\n", ntohs(chatDataPacket.type));
+
+					//chatResponsePacket (acknowledgement of reception of previous packet) from server
+					if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
+						printf("didn't receive acknowledgement");
+						exit(1);
+					}
+					else{
+						printf("\nReceived acknowledgement packet type %u from server", ntohs(chatResponsePacket.type));
+						printf("\nEnter chat to send: ");
+					}
+					
+				}
+			}
+		}
+			
+	}
+	/* main loop: get and send lines of text */
+	//while(fgets(buf, sizeof(buf), stdin)){
+	
 	//	buf[MAX_LINE-1] = '\0';
 	//	len = strlen(buf) + 1;
 	//	send(s, buf, len, 0);
-	}
+	//}
 
 
 }
