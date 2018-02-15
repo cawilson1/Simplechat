@@ -16,6 +16,7 @@ struct packet{
 	char uname[MAX_LINE];
 	char mname[MAX_LINE];
 	char data[MAX_LINE];
+	short regTableIndex;
 };	
 
 struct registrationTable{
@@ -25,7 +26,7 @@ struct registrationTable{
 	char uname[MAX_LINE];
 };
 
-struct packet registrationPacket, confirmationPacket, chatDataPacket, chatResponsePacket;//initialize these
+struct packet registrationPacket, confirmationPacket, chatDataPacket, chatResponsePacket;
 struct registrationTable registrationTable[10];
 int registrationTableIndex = 0;
 
@@ -33,10 +34,16 @@ int registrationTableIndex = 0;
 void createConfirmationPacket221(){
 	confirmationPacket.type = htons(221);
 	strncpy(confirmationPacket.uname, registrationPacket.uname, sizeof(registrationPacket.uname));
+	//From this point on, the client needs to store its index in the registration table on the server
+	confirmationPacket.regTableIndex = htons(registrationTableIndex);
 }
 
 void createAcknowledgementPacket231(){
 	chatResponsePacket.type = htons(231);
+	strncpy(chatResponsePacket.uname, chatDataPacket.uname, sizeof(chatDataPacket.uname));
+	strncpy(chatResponsePacket.data, chatDataPacket.data, sizeof(chatDataPacket.data));
+	//recieve reg table index from client
+	chatDataPacket.regTableIndex = ntohs(registrationTableIndex);
 }
 
 void printRegistrationTable(){
@@ -104,25 +111,27 @@ int main(int argc, char* argv[])
 			printf("%s", registrationPacket.mname);
 
 			//add current message received to registration table
-			registrationTable[registrationTableIndex].port = clientAddr.sin_port;
+			registrationTable[registrationTableIndex].port = ntohs(clientAddr.sin_port);
 			registrationTable[registrationTableIndex].sockid = new_s;
 			strncpy(registrationTable[registrationTableIndex].uname, registrationPacket.uname, sizeof(registrationPacket.uname));
 			strncpy(registrationTable[registrationTableIndex].mname, registrationPacket.mname, sizeof(registrationPacket.mname));
 
 			printRegistrationTable();
-		
-			//Eventually this should be stored in a struct, but for now with one host, this suffices. Index will always be zero.
-			registrationTableIndex = registrationTableIndex + 1;
 
 			//send registration acceptance to client
 			createConfirmationPacket221();	
-			printf("\n\nConfirmation packet being sent: %u", ntohs(confirmationPacket.type));
-			printf("\nConfirmation packet username: %s", confirmationPacket.uname);
+
+			//Eventually this should be stored in a struct, but for now with one host, this suffices. Index will always be zero.
+			registrationTableIndex = registrationTableIndex + 1;
+
+			printf("\n\nConfirmation packet %u being sent ", ntohs(confirmationPacket.type));
+			printf("to user: %s", confirmationPacket.uname);
 			if(send(new_s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
-				printf("error");
+				printf("...error sending confirmation packet");
+				exit(1);
 			}
 			else{
-				printf("\nConfirmation packet 221 sent");
+				printf("...sent successfully");
 
 				//receive chat data packet
 				while(1){
@@ -132,21 +141,19 @@ int main(int argc, char* argv[])
 					}		
 					//recieved chat data packet
 					else{
-						printf("\n\nChat data packet %u recieved successfully from server for", ntohs(chatDataPacket.type));
-						printf(" user %s: ", chatDataPacket.uname);
-						printf("\n%s", chatDataPacket.data);
+						printf("\nChat data packet %u recieved successfully from server for:", ntohs(chatDataPacket.type));
+						printf("\n[%s]: ", chatDataPacket.uname);
+						printf(" %s", chatDataPacket.data);
 
 						//send acknowledgment
 						createAcknowledgementPacket231();
 						if(send(new_s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
-							printf("error sending acknowledgement 231");
+							printf("error sending acknowledgement 231\n");
+							exit(1);
 						}
-						//Acknowledgement sent
+						//Acknowledgement sent to echo chat on client side
 						else{
-							printf("\nAcknowledgement packet %u sent", ntohs(chatResponsePacket.type));
-					
-							//without putting this last command previous will not run for some reason.
-							printf("\nAcknowledgement packet %u sent", ntohs(chatResponsePacket.type));
+							printf("Acknowledgement packet %u sent to %s\n", ntohs(chatResponsePacket.type), chatResponsePacket.uname);
 						}
 					}		
 				}
