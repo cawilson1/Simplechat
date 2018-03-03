@@ -6,6 +6,7 @@
 #include<string.h>
 #include<stdlib.h>
 #include<sys/param.h>
+#include <unistd.h>
 
 #define SERVER_PORT 9025
 #define MAX_LINE 256
@@ -18,6 +19,7 @@ struct packet{
 	char mname[MAX_LINE];
 	char data[MAX_LINE];
 	short regTableIndex;
+	short seqNumber;
 };	
 
 void printGreen(){
@@ -27,6 +29,7 @@ void printGreen(){
 void printColorReset(){
 	printf("\033[0m");
 }
+
 
 int main(int argc, char* argv[])
 {
@@ -99,21 +102,31 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 
-	//send the registration packet to the server
-	if(send(s, &registrationPacket, sizeof(registrationPacket), 0) < 0)
-	{
-		printf("\nSend failed\n");
-		exit(1);
-	}
-	//registration packet sent without error
-	else{
-		printf("\nSent packet %u registration packet ", ntohs(registrationPacket.type)); 
-		printf("\n-----------------------------------------------------\n");
-		//receive confirmation packet
-		if(recv(s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
-			printf("\ndidn't receive confirmation packet");
+	//send reg packet three times with slight pause between
+	int i;
+	for(i = 0; i < 3; i++){
+		//send the registration packet to the server
+		if(send(s, &registrationPacket, sizeof(registrationPacket), 0) < 0)
+		{
+			printf("\nSend failed\n");
 			exit(1);
 		}
+		//registration packet sent without error
+		else{
+			printf("\nSent packet %u registration packet %i", ntohs(registrationPacket.type), i + 1); 
+			printf("\n-----------------------------------------------------\n");
+		}
+		
+		//sleep for one twentieth of a second to give multicaster thread time to start
+		sleep(.05);
+	}
+
+
+	//receive confirmation packet
+	if(recv(s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
+		printf("\ndidn't receive confirmation packet");
+		exit(1);
+	}
 		//confirmation packet received without error
 		else{
 			printf("\n\nConfirmation packet %u recieved successfully from server for", ntohs(confirmationPacket.type));
@@ -124,45 +137,47 @@ int main(int argc, char* argv[])
 
 			//set server registration table index
 			serverRegTableIndex = ntohs(confirmationPacket.regTableIndex);
-
-			//loop to receive input to send the chat data packet to the server
-			while(fgets(buf, sizeof(buf),stdin)){
-				buf[MAX_LINE-1] = '\0';
-				len = strlen(buf) + 1;
-				//create chat data packet
-				chatDataPacket.type = htons(131);
-				strncpy(chatDataPacket.uname,confirmationPacket.uname,sizeof(confirmationPacket.uname));
-				strncpy(chatDataPacket.data,buf,len);
-				chatDataPacket.regTableIndex = htons(serverRegTableIndex);
-
-				//send chat data packet
-				if(send(s, &chatDataPacket,sizeof(chatDataPacket),0) < 0){
-					printf("\nchat data packet error");
-					exit(1);
-				}
-				//chat packet sent successfully
-				else{
-					//chatResponsePacket (acknowledgement of reception of previous packet) from server
-					if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
-						printf("didn't receive acknowledgement");
-						exit(1);
-					}
-					else{
-						//message recieved
-						printGreen();
-						printf("[%s]:", chatResponsePacket.uname);
-						printf("%s", chatResponsePacket.data);
-						printColorReset();
-
-						//prompt for user to type next method
-						printf("\n[%s]:", chatResponsePacket.uname);
-					}
-					
-				}
-			}
-		}
-			
 	}
+
+
+	//loop to receive input to send the chat data packet to the server
+	while(fgets(buf, sizeof(buf),stdin)){
+		buf[MAX_LINE-1] = '\0';
+		len = strlen(buf) + 1;
+		//create chat data packet
+		chatDataPacket.type = htons(131);
+		strncpy(chatDataPacket.uname,confirmationPacket.uname,sizeof(confirmationPacket.uname));
+		strncpy(chatDataPacket.data,buf,len);
+		chatDataPacket.regTableIndex = htons(serverRegTableIndex);
+
+		//send chat data packet
+		if(send(s, &chatDataPacket,sizeof(chatDataPacket),0) < 0){
+			printf("\nchat data packet error");
+			exit(1);
+		}
+
+		//chat packet sent successfully
+		//chatResponsePacket (acknowledgement of reception of previous packet) from server
+		if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
+			printf("didn't receive acknowledgement");
+			exit(1);
+		}
+		else{
+			//message recieved
+			printGreen();
+			printf("[%s]:", chatResponsePacket.uname);
+			printf("%s", chatResponsePacket.data);
+			printColorReset();
+
+			//prompt for user to type next method
+			printf("\n[%s]:", chatResponsePacket.uname);
+		}
+					
+
+	}
+}
+			
+	
 
 	//from original program. keep temporarily in case needed later	
 	
@@ -175,4 +190,3 @@ int main(int argc, char* argv[])
 	//}
 
 
-}

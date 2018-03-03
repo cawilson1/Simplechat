@@ -17,6 +17,7 @@ struct packet{
 	char mname[MAX_LINE];
 	char data[MAX_LINE];
 	short regTableIndex;
+	short seqNumber;
 };	
 
 struct registrationTable{
@@ -27,7 +28,7 @@ struct registrationTable{
 };
 
 struct packet registrationPacket, confirmationPacket, chatDataPacket, chatResponsePacket;
-struct registrationTable registrationTable[10];
+struct registrationTable registrationTableEntries[10];
 int registrationTableIndex = 0;
 
 
@@ -48,12 +49,95 @@ void createAcknowledgementPacket231(){
 
 void printRegistrationTable(){
 	printf("\n\n---------------Created new registration table entry:------------------\n");
-	printf("port: %u\n", registrationTable[registrationTableIndex].port);
-	printf("sockid: %u\n", registrationTable[registrationTableIndex].sockid);
-	printf("username: %s\n", registrationTable[registrationTableIndex].uname);
-	printf("machine name: %s\n", registrationTable[registrationTableIndex].mname);
+	printf("port: %u\n", registrationTableEntries[registrationTableIndex].port);
+	printf("sockid: %u\n", registrationTableEntries[registrationTableIndex].sockid);
+	printf("username: %s\n", registrationTableEntries[registrationTableIndex].uname);
+	printf("machine name: %s\n", registrationTableEntries[registrationTableIndex].mname);
 	printf("table entry index: %u", registrationTableIndex);
 	printf("\n-----------------------------------------------------------------------\n");
+}
+
+void chatMulticaster(int new_s){
+	//receive chat data packet
+	while(1){
+		if(recv(new_s, &chatDataPacket, sizeof(chatDataPacket), 0) < 0){
+			printf("\nCould not receive the chat data packet packet\n");
+			exit(1);
+		}		
+		//recieved chat data packet
+		else{
+			printf("\nChat data packet %u recieved successfully from server for:", ntohs(chatDataPacket.type));
+			printf("\n[%s]: ", chatDataPacket.uname);
+			printf(" %s", chatDataPacket.data);
+
+			//send acknowledgment
+			createAcknowledgementPacket231();
+			if(send(new_s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
+				printf("error sending acknowledgement 231\n");
+				exit(1);
+			}
+			//Acknowledgement sent to echo chat on client side
+			else{
+				printf("Acknowledgement packet %u sent to %s\n", ntohs(chatResponsePacket.type), chatResponsePacket.uname);
+			}
+		}		
+			
+
+	}
+}
+
+void sendConfirmationPacket(int new_s){
+	createConfirmationPacket221();	
+
+	printf("\n\nConfirmation packet %u being sent ", ntohs(confirmationPacket.type));
+	printf("to user: %s", confirmationPacket.uname);
+		
+	//send confirmation packet
+	if(send(new_s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
+		printf("...error sending confirmation packet");
+		exit(1);
+	}
+	else{
+		printf("...sent successfully");
+	}
+}
+
+void joinHandler(int new_s, struct sockaddr_in clientAddr){
+
+	//needs to get two more confirmation packets to send ACK
+	int i;
+	for(i = 0; i < 2; i++){
+		//attempt to recieve registration packet
+		if(recv(new_s, &registrationPacket, sizeof(registrationPacket), 0) < 0){
+			printf("\nCould not receive registration packet %i\n", i);
+			exit(1);
+		}
+		//Registration packet
+		else if(htons(registrationPacket.type)==121){
+			printf("\nRecieved registration packet %i", i + 2);
+		}
+		else{
+			//packet recieved but wrong type
+			printf("Wrong type of packet recieved.");
+			exit(1);
+		}
+	}//all three registration packets have been recieved
+
+	//add current client received to registration table
+	registrationTableEntries[registrationTableIndex].port = ntohs(clientAddr.sin_port);
+	registrationTableEntries[registrationTableIndex].sockid = new_s;
+	strncpy(registrationTableEntries[registrationTableIndex].uname, registrationPacket.uname, sizeof(registrationPacket.uname));
+	strncpy(registrationTableEntries[registrationTableIndex].mname, registrationPacket.mname, sizeof(registrationPacket.mname));
+
+	printRegistrationTable();
+
+	//increment index for the entry	
+	registrationTableIndex = registrationTableIndex + 1;
+
+	sendConfirmationPacket(new_s);
+
+	//since confirmation sent, start the actual chat
+	chatMulticaster(new_s);
 }
 
 int main(int argc, char* argv[])
@@ -92,84 +176,34 @@ int main(int argc, char* argv[])
 		}
 		
 		printf("\nClient's port is %d \n", ntohs(clientAddr.sin_port)); 
-
-		//error
+		
+		//attempt to recieve registration packets
 		if(recv(new_s, &registrationPacket, sizeof(registrationPacket), 0) < 0){
 			printf("\nCould not receive the first registration packet\n");
 			exit(1);
 		}
-		//Registration packet
+		//First registration packet received
 		else if(htons(registrationPacket.type)==121){
-			printf("\nRegistration packet:");
-			printf("\nPacket type: ");
-			printf("%u",htons(registrationPacket.type));
-			
-			printf("\nUsername: ");
-			printf("%s", registrationPacket.uname);
-
-			printf("\nMachine Name: ");
-			printf("%s", registrationPacket.mname);
-
-			//add current message received to registration table
-			registrationTable[registrationTableIndex].port = ntohs(clientAddr.sin_port);
-			registrationTable[registrationTableIndex].sockid = new_s;
-			strncpy(registrationTable[registrationTableIndex].uname, registrationPacket.uname, sizeof(registrationPacket.uname));
-			strncpy(registrationTable[registrationTableIndex].mname, registrationPacket.mname, sizeof(registrationPacket.mname));
-
-			printRegistrationTable();
-
-			//send registration acceptance to client
-			createConfirmationPacket221();	
-
-			//Eventually this should be stored in a struct, but for now with one host, this suffices. Index will always be zero.
-			registrationTableIndex = registrationTableIndex + 1;
-
-			printf("\n\nConfirmation packet %u being sent ", ntohs(confirmationPacket.type));
-			printf("to user: %s", confirmationPacket.uname);
-			if(send(new_s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
-				printf("...error sending confirmation packet");
-				exit(1);
-			}
-			else{
-				printf("...sent successfully");
-
-				//receive chat data packet
-				while(1){
-					if(recv(new_s, &chatDataPacket, sizeof(chatDataPacket), 0) < 0){
-						printf("\nCould not receive the chat data packet packet\n");
-						exit(1);
-					}		
-					//recieved chat data packet
-					else{
-						printf("\nChat data packet %u recieved successfully from server for:", ntohs(chatDataPacket.type));
-						printf("\n[%s]: ", chatDataPacket.uname);
-						printf(" %s", chatDataPacket.data);
-
-						//send acknowledgment
-						createAcknowledgementPacket231();
-						if(send(new_s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
-							printf("error sending acknowledgement 231\n");
-							exit(1);
-						}
-						//Acknowledgement sent to echo chat on client side
-						else{
-							printf("Acknowledgement packet %u sent to %s\n", ntohs(chatResponsePacket.type), chatResponsePacket.uname);
-						}
-					}		
-				}
-
-			}
-
-			//for some reason the last step does not execute until the program has concluded, so this is last step
-			printf("\nUsername: ");
-			printf("%s", registrationPacket.uname);
-
+			printf("\nRecieved registration packet 1");
+			//call join handler
+			joinHandler(new_s, clientAddr);
 		}
+		//packet recieved but wrong type
+		else{
+			printf("Wrong type of packet recieved.");
+		}
+
+
+		//for some reason the last step does not execute until the program has concluded, so this is last step
+		printf("\nUsername: ");
+		printf("%s", registrationPacket.uname);
+
+	}
 
 		//while(len = recv(new_s, buf, sizeof(buf), 0))
 		//	fputs(buf, stdout);
 		//close(new_s);
 
 
-	}
+	
 }
