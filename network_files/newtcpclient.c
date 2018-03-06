@@ -8,7 +8,7 @@
 #include<sys/param.h>
 #include <unistd.h>
 
-#define SERVER_PORT 9025
+#define SERVER_PORT 9034
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -117,8 +117,6 @@ int main(int argc, char* argv[])
 			printf("\n-----------------------------------------------------\n");
 		}
 		
-		//sleep for one twentieth of a second to give multicaster thread time to start
-		sleep(.05);
 	}
 
 
@@ -139,9 +137,28 @@ int main(int argc, char* argv[])
 			serverRegTableIndex = ntohs(confirmationPacket.regTableIndex);
 	}
 
+	//continuously receive data
+	while(1){
+		if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
+			printf("didn't receive acknowledgement");
+			exit(1);
+		}
+		else{
+			//message recieved
+			printGreen();
+			printf("%s", chatResponsePacket.data);
+			printColorReset();
 
+			//prompt for user to type next method
+			printf("\n[%s]:", chatResponsePacket.uname);
+		}
+	}
+
+	
+	/*Will be used for future assignments	
 	//loop to receive input to send the chat data packet to the server
 	while(fgets(buf, sizeof(buf),stdin)){
+		
 		buf[MAX_LINE-1] = '\0';
 		len = strlen(buf) + 1;
 		//create chat data packet
@@ -173,8 +190,8 @@ int main(int argc, char* argv[])
 			printf("\n[%s]:", chatResponsePacket.uname);
 		}
 					
-
-	}
+		*/
+	//}
 }
 			
 	
