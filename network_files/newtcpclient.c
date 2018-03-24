@@ -8,7 +8,7 @@
 #include<sys/param.h>
 #include <unistd.h>
 
-#define SERVER_PORT 9034
+#define SERVER_PORT 9035
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -20,7 +20,9 @@ struct packet{
 	char data[MAX_LINE];
 	short regTableIndex;
 	short seqNumber;
+	char groupId[MAX_LINE];//chat room
 };	
+
 
 void printGreen(){
 	printf(GREEN);
@@ -30,11 +32,37 @@ void printColorReset(){
 	printf("\033[0m");
 }
 
+void *recvServerPackets(void* arg){
+
+	struct packet chatResponsePacket;
+	//convert back to int
+	int s = (intptr_t)(void*)arg;
+
+	while(1){
+
+		//chat packet sent successfully
+		//chatResponsePacket (acknowledgement of reception of previous packet) from server
+		if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
+			printf("didn't receive acknowledgement");
+			exit(1);
+		}
+		else{
+			//message recieved
+			printGreen();
+			printf("[%s]:", chatResponsePacket.uname);
+			printf("%s", chatResponsePacket.data);
+			printColorReset();
+
+			//prompt for user to type next method
+		//	printf("[%s]:", chatResponsePacket.uname);
+		}
+	}	
+}
 
 int main(int argc, char* argv[])
 {
 
-	struct packet registrationPacket, confirmationPacket, chatDataPacket, chatResponsePacket;
+struct packet registrationPacket, confirmationPacket, chatDataPacket;
 
 	struct hostent *hp;
 	struct sockaddr_in sin;
@@ -43,19 +71,24 @@ int main(int argc, char* argv[])
 	char buf[MAX_LINE];
 	char arg2Username[MAX_LINE];
 
+	pthread_t threads[1];
 	int s;
 	int len;
+
+	//groupId is the chat room
+	char groupId[MAX_LINE];
 
 	//After contact is made, this value should be stored
 	int serverRegTableIndex;
 
-	if(argc == 3){
+	if(argc == 4){
 		printf("-----------------New Chat Initiated--------------------\n");
 		host = argv[1];
 		strcpy(arg2Username,argv[2]);
+		strncpy(groupId, argv[3], sizeof(argv[3]));
 	}
 	else{
-		fprintf(stderr, "incorrect argument count\nUse: ./<executable_file_name> <server_name_or_ip> <username>\n"
+		fprintf(stderr, "incorrect argument count\nUse: ./<executable_file_name> <server_name_or_ip> <username><groupId>\n"
 			"Example: ./client macs.citadel.edu my_username\n");
 		exit(1);
 	}
@@ -79,6 +112,7 @@ int main(int argc, char* argv[])
 	strncpy(registrationPacket.mname, myMachineName, sizeof(myMachineName));
 	//set packet username
 	strncpy(registrationPacket.uname, arg2Username, sizeof(arg2Username));	
+	strncpy(registrationPacket.groupId, groupId, sizeof(groupId));
 
 	printf("Username: ");
 	printf(registrationPacket.uname);
@@ -137,8 +171,10 @@ int main(int argc, char* argv[])
 			serverRegTableIndex = ntohs(confirmationPacket.regTableIndex);
 	}
 
+	pthread_create(&threads[0], NULL, recvServerPackets, (void*)(intptr_t)s);
+
 	//continuously receive data
-	while(1){
+	/*while(1){
 		if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
 			printf("didn't receive acknowledgement");
 			exit(1);
@@ -152,10 +188,10 @@ int main(int argc, char* argv[])
 			//prompt for user to type next method
 			printf("\n[%s]:", chatResponsePacket.uname);
 		}
-	}
+	}*/
 
 	
-	/*Will be used for future assignments	
+	//Will be used for future assignments	
 	//loop to receive input to send the chat data packet to the server
 	while(fgets(buf, sizeof(buf),stdin)){
 		
@@ -172,26 +208,11 @@ int main(int argc, char* argv[])
 			printf("\nchat data packet error");
 			exit(1);
 		}
-
-		//chat packet sent successfully
-		//chatResponsePacket (acknowledgement of reception of previous packet) from server
-		if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
-			printf("didn't receive acknowledgement");
-			exit(1);
-		}
 		else{
-			//message recieved
-			printGreen();
-			printf("[%s]:", chatResponsePacket.uname);
-			printf("%s", chatResponsePacket.data);
-			printColorReset();
-
-			//prompt for user to type next method
-			printf("\n[%s]:", chatResponsePacket.uname);
+			printf("");//newline
 		}
-					
-		*/
-	//}
+		
+	}
 }
 			
 	
