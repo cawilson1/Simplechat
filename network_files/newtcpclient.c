@@ -8,7 +8,7 @@
 #include<sys/param.h>
 #include <unistd.h>
 
-#define SERVER_PORT 9036
+#define SERVER_PORT 9042
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -23,21 +23,22 @@ struct packet{
 	char groupId[MAX_LINE];//chat room
 };	
 
-
+//everything that user is not actively typing is green
 void printGreen(){
 	printf(GREEN);
 }
 
+//set back to default color
 void printColorReset(){
 	printf("\033[0m");
 	printf("\n");
 }
 
+//receive packets from other clients in this room
 void *recvServerPackets(void* arg){
 
 	struct packet chatResponsePacket;
-	//convert back to int
-	int s = (intptr_t)(void*)arg;
+	int s = (intptr_t)(void*)arg;//convert arg back to int
 
 	while(1){
 
@@ -50,20 +51,17 @@ void *recvServerPackets(void* arg){
 		else{
 			//message recieved
 			printGreen();
-			printf("\n[%s]:", chatResponsePacket.uname);
-			printf("%s", chatResponsePacket.data);
+			printf("\n[%s]:", chatResponsePacket.uname);//name of user
+			printf("%s", chatResponsePacket.data);//data sent
 			printColorReset();
-
-			//prompt for user to type next method
-		//	printf("[%s]:", chatResponsePacket.uname);
 		}
 	}	
 }
 
-int main(int argc, char* argv[])
-{
-printColorReset();
-struct packet registrationPacket, confirmationPacket, chatDataPacket;
+int main(int argc, char* argv[]){
+
+	printColorReset();
+	struct packet registrationPacket, confirmationPacket, chatDataPacket;
 
 	struct hostent *hp;
 	struct sockaddr_in sin;
@@ -107,13 +105,10 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 	printf("me: %s\n", myMachineName);
 
 	//create registration packet from command line args
-	//packet type
-	registrationPacket.type = htons(121);
-	//set packet machine name
-	strncpy(registrationPacket.mname, myMachineName, sizeof(myMachineName));
-	//set packet username
-	strncpy(registrationPacket.uname, arg2Username, sizeof(arg2Username));	
-	strncpy(registrationPacket.groupId, groupId, sizeof(groupId));
+	registrationPacket.type = htons(121);//packet type
+	strncpy(registrationPacket.mname, myMachineName, sizeof(myMachineName));//set client machine name
+	strncpy(registrationPacket.uname, arg2Username, sizeof(arg2Username));//set client username
+	strncpy(registrationPacket.groupId, groupId, sizeof(groupId));//set chatroom name
 
 	printf("Username: ");
 	printf(registrationPacket.uname);
@@ -137,7 +132,7 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 		exit(1);
 	}
 
-	//send reg packet three times with slight pause between
+	//send reg packet three
 	int i;
 	for(i = 0; i < 3; i++){
 		//send the registration packet to the server
@@ -153,7 +148,6 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 		}
 		
 	}
-
 
 	//receive confirmation packet
 	if(recv(s, &confirmationPacket, sizeof(confirmationPacket), 0) < 0){
@@ -172,27 +166,8 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 			serverRegTableIndex = ntohs(confirmationPacket.regTableIndex);
 	}
 
-	pthread_create(&threads[0], NULL, recvServerPackets, (void*)(intptr_t)s);
+	pthread_create(&threads[0], NULL, recvServerPackets, (void*)(intptr_t)s);//thread to listen for others in chatroom. socket is argument
 
-	//continuously receive data
-	/*while(1){
-		if(recv(s, &chatResponsePacket, sizeof(chatResponsePacket), 0) < 0){
-			printf("didn't receive acknowledgement");
-			exit(1);
-		}
-		else{
-			//message recieved
-			printGreen();
-			printf("%s", chatResponsePacket.data);
-			printColorReset();
-
-			//prompt for user to type next method
-			printf("\n[%s]:", chatResponsePacket.uname);
-		}
-	}*/
-
-	
-	//Will be used for future assignments	
 	//loop to receive input to send the chat data packet to the server
 	while(fgets(buf, sizeof(buf),stdin)){
 		
@@ -209,23 +184,6 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 			printf("\nchat data packet error");
 			exit(1);
 		}
-		else{
-			//printColorReset();
-		}
-		
+		//else sent successfully
 	}
 }
-			
-	
-
-	//from original program. keep temporarily in case needed later	
-	
-	/* main loop: get and send lines of text */
-	//while(fgets(buf, sizeof(buf), stdin)){
-	
-	//	buf[MAX_LINE-1] = '\0';
-	//	len = strlen(buf) + 1;
-	//	send(s, buf, len, 0);
-	//}
-
-
