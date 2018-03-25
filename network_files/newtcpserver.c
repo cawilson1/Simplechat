@@ -10,7 +10,7 @@
 #include<stdint.h>
 #include <fcntl.h>
 
-#define SERVER_PORT 9035
+#define SERVER_PORT 9036
 #define MAX_LINE 256
 #define MAX_PENDING 5
 
@@ -39,9 +39,16 @@ int currentRegTableIndex = 0;
 pthread_t threads[2];
 int clientInTableBool = 0;
 pthread_mutex_t my_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t bufferMutex = PTHREAD_MUTEX_INITIALIZER;//for the buffer table
 int currentSeqNum = 0;
-//used in join handler for adding new clients
-struct registrationTable tempTable;
+
+struct registrationTable tempTable;//used in join handler for adding new clients
+struct packet packetBuffer[MAX_LINE];
+short bufferIndex = 0;
+
+
+
+
 
 
 void createConfirmationPacket221(){
@@ -69,28 +76,57 @@ void printRegistrationTable(){
 	printf("\n-----------------------------------------------------------------------\n");
 }
 
-void *chatMulticaster(void* uniqueSocket){
-
+void *chatMulticaster(){//void *tempGroupString){ //void* uniqueSocket){
+	
+	//char chatroom[sizeof(tempGroupString)];
+	//strncpy(chatroom, tempGroupString, sizeof(tempGroupString));
+	//printf("\nchatroom %s\n", chatroom);
+	
 	//convert back to int
-	int uniqueSocketInt = (intptr_t)uniqueSocket;
-	printf("\nChat Multicaster created for client with sockId %i", uniqueSocketInt);
+	//int uniqueSocketInt = (intptr_t)uniqueSocket;
+	//printf("\nChat Multicaster created for client with sockId %i", uniqueSocketInt);
 			
 	struct packet broadcastPacket;
-	char *filename;
-	char text[20];
-	int fd;
-	filename = "input.txt";
-	fd = open(filename,O_RDONLY, 0);
 
 	while(1){
 		//only starts once at least one client is in the table	
 		while(clientInTableBool){
-
+			
+			//needs to be locked for entire duration of this process
+			pthread_mutex_lock(&bufferMutex);
+			int i, j;
+			//iterate through to the current highest used index
+			for(i = 0; i < bufferIndex; i++){
+				strncpy(broadcastPacket.uname, packetBuffer[i].uname, sizeof(packetBuffer[i].uname));
+				strncpy(broadcastPacket.groupId, packetBuffer[i].groupId, sizeof(packetBuffer[i].groupId));
+				strncpy(broadcastPacket.data, packetBuffer[i].data, sizeof(packetBuffer[i].data));
+				//10 is the max numb of reg table entries
+				for(j = 0; j < 10; j++){
+					//this entry is in the same chat room that the buffered message should be sent to
+					if(registrationTableEntries[j].entryExistsBool == 1 && (strcmp(registrationTableEntries[j].groupId,broadcastPacket.groupId)==0)){
+						pthread_mutex_lock(&my_mutex);						
+						int new_s = registrationTableEntries[j].sockid;
+						pthread_mutex_unlock(&my_mutex);
+						if(send(new_s, &broadcastPacket, sizeof(broadcastPacket), 0) < 0){
+							printf("error sending acknowledgement 231\n");
+							exit(1);
+						}
+						else{
+							printf("\nbroadcast packet sent to %s", registrationTableEntries[j].uname);
+						}
+					}
+				}
+			}
+			bufferIndex = 0;
+			pthread_mutex_unlock(&bufferMutex);
+			sleep(5);
+		}
+/*
 			int i;
 			//10 is size of regTableEntries
 			for(i = 0; i < 10; i++){
-				//if this is 1, then this table index contains an entry. Send a packet to this entry.
-				if(registrationTableEntries[i].entryExistsBool == 1){
+				//if this is 1, then this table index contains an entry. Iterates through all members with this groupId. Send a packet to this entry.
+				if(registrationTableEntries[i].entryExistsBool == 1 && (strcmp(registrationTableEntries[i].groupId,chatroom)==0)){
 
 					//strncpy(broadcastPacket.data, text, sizeof(text));
 					pthread_mutex_lock(&my_mutex);
@@ -105,9 +141,8 @@ void *chatMulticaster(void* uniqueSocket){
 					}
 					//recieved chat data packet
 					else{
-						printf("\nChat data packet %u recieved successfully from server for:", ntohs(chatDataPacket.type));
-				short groupId;//chat room		printf("\n[%s]: ", chatDataPacket.uname);
-						printf(" %s", chatDataPacket.data);
+						printf("\nChat data packet %u recieved successfully from server for: %s", ntohs(chatDataPacket.type),chatDataPacket.uname);
+						printf("\nData recieved: %s", chatDataPacket.data);
 
 						//send acknowledgment
 						createAcknowledgementPacket231();
@@ -120,18 +155,8 @@ void *chatMulticaster(void* uniqueSocket){
 							printf("Acknowledgement packet %u sent to %s\n", ntohs(chatResponsePacket.type), chatResponsePacket.uname);
 						}
 					}
-					/*if(send(new_s, &broadcastPacket, sizeof(broadcastPacket), 0) < 0){
-						printf("\nCouldn't send packet");
-						exit(1);
-					}
-					else{
-						printf("\npacket sent to %s with sequence number %i", broadcastPacket.uname, ntohs(broadcastPacket.seqNumber));
-					}*/
 				}
 			}
-			//sleep(1);
-			//currentSeqNum++;
-			
 			
 		}	//*/
 	}
@@ -214,6 +239,7 @@ void *joinHandler(){
 	pthread_mutex_lock(&my_mutex);
 	int new_s = tempTable.sockid;
 	pthread_mutex_unlock(&my_mutex);
+	char chatRoom[MAX_LINE];
 
 	//needs to get two more confirmation packets to send ACK
 	int i;
@@ -227,6 +253,7 @@ void *joinHandler(){
 		else if(htons(registrationPacket.type)==121){
 			printf("\nRecieved registration packet %i\n", i + 2);
 			printf("The group ID from the packet %s\n", registrationPacket.groupId);
+			strncpy(chatRoom,registrationPacket.groupId,sizeof(registrationPacket.groupId));
 		}
 		else{
 			//packet recieved but wrong type
@@ -244,10 +271,10 @@ void *joinHandler(){
 	registrationTableEntries[currentRegTableIndex].sockid = new_s;
 	strncpy(registrationTableEntries[currentRegTableIndex].uname, tempTable.uname, sizeof(tempTable.uname));
 	strncpy(registrationTableEntries[currentRegTableIndex].mname, tempTable.mname, sizeof(tempTable.mname));
-	strncpy(registrationTableEntries[currentRegTableIndex].groupId, registrationPacket.groupId, sizeof(registrationPacket.groupId));
+	strncpy(registrationTableEntries[currentRegTableIndex].groupId, chatRoom, sizeof(chatRoom));
 	registrationTableEntries[currentRegTableIndex].entryExistsBool = 1;
 	pthread_mutex_unlock(&my_mutex);
-	printf("The group ID updated in the tabkle is %s", registrationTableEntries[currentRegTableIndex].groupId);
+	printf("The group ID updated in the table is %s", registrationTableEntries[currentRegTableIndex].groupId);
 
 	//table now contains a client
 	clientInTableBool = 1;
@@ -255,10 +282,34 @@ void *joinHandler(){
 
 	sendConfirmationPacket(new_s);
 
-	//create multicaster thread for unique client
-	pthread_create(&threads[1], NULL, chatMulticaster, (void*)(intptr_t)new_s);
 
-	pthread_exit(NULL);
+	//create multicaster thread for unique client
+	//pthread_create(&threads[1], NULL, chatMulticaster, (void*)registrationPacket.groupId);//(void*)(intptr_t)new_s);
+
+	//pthread_exit(NULL);
+
+	//constantly check for new data and update table
+	while(1){
+		if(recv(new_s, &chatDataPacket, sizeof(chatDataPacket), 0) < 0){
+			printf("\nCould not receive the chat data packet packet\n");
+			exit(1);
+			}
+		//recieved chat data packet
+		else{
+			printf("\nChat data packet %u recieved successfully from server for: %s", ntohs(chatDataPacket.type),chatDataPacket.uname);
+			printf("\nData recieved: %s", chatDataPacket.data);
+
+			//update buffer and increment index
+			pthread_mutex_lock(&bufferMutex);
+			//packetBuffer[bufferIndex].sockId = new_s;
+			strncpy(packetBuffer[bufferIndex].uname, chatDataPacket.uname, sizeof(chatDataPacket.uname));
+			strncpy(packetBuffer[bufferIndex].groupId, chatRoom, sizeof(chatRoom));
+			strncpy(packetBuffer[bufferIndex].data, chatDataPacket.data, sizeof(chatDataPacket.data));
+			bufferIndex++;
+			pthread_mutex_unlock(&bufferMutex);
+			//printf("\n the buffer was updated and uname and groupId are %s and %s", packetBuffer[bufferIndex-1].uname, packetBuffer[bufferIndex-1].groupId);
+		}
+	}
 }
 
 int main(int argc, char* argv[])
@@ -290,7 +341,7 @@ int main(int argc, char* argv[])
 	listen(s, MAX_PENDING);
 
 	//create multicaster thread
-	//pthread_create(&threads[1], NULL, chatMulticaster, NULL);
+	pthread_create(&threads[1], NULL, chatMulticaster, NULL);
 	printf("Waiting for connection...\n");
 
 
@@ -325,7 +376,7 @@ int main(int argc, char* argv[])
 
 			//call join handler
 			pthread_create(&threads[0], NULL, joinHandler, NULL);
-			pthread_join(threads[0], NULL);
+			//pthread_join(threads[0], NULL);
 		}
 		//packet recieved but wrong type
 		else{
@@ -335,4 +386,4 @@ int main(int argc, char* argv[])
 		//while(len = recv(new_s, buf, sizeof(buf), 0))
 		//	fputs(buf, stdout);
 		//close(new_s);
-}
+}

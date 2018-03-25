@@ -8,7 +8,7 @@
 #include<sys/param.h>
 #include <unistd.h>
 
-#define SERVER_PORT 9035
+#define SERVER_PORT 9036
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -30,6 +30,7 @@ void printGreen(){
 
 void printColorReset(){
 	printf("\033[0m");
+	printf("\n");
 }
 
 void *recvServerPackets(void* arg){
@@ -49,7 +50,7 @@ void *recvServerPackets(void* arg){
 		else{
 			//message recieved
 			printGreen();
-			printf("[%s]:", chatResponsePacket.uname);
+			printf("\n[%s]:", chatResponsePacket.uname);
 			printf("%s", chatResponsePacket.data);
 			printColorReset();
 
@@ -61,7 +62,7 @@ void *recvServerPackets(void* arg){
 
 int main(int argc, char* argv[])
 {
-
+printColorReset();
 struct packet registrationPacket, confirmationPacket, chatDataPacket;
 
 	struct hostent *hp;
@@ -89,7 +90,7 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 	}
 	else{
 		fprintf(stderr, "incorrect argument count\nUse: ./<executable_file_name> <server_name_or_ip> <username><groupId>\n"
-			"Example: ./client macs.citadel.edu my_username\n");
+			"Example: ./client macs.citadel.edu my_username 4\n");
 		exit(1);
 	}
 
@@ -209,7 +210,7 @@ struct packet registrationPacket, confirmationPacket, chatDataPacket;
 			exit(1);
 		}
 		else{
-			printf("");//newline
+			//printColorReset();
 		}
 		
 	}
