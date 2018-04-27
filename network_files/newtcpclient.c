@@ -87,8 +87,6 @@ int main(int argc, char* argv[]){
 		host = argv[1];
 		strcpy(arg2Username,argv[2]);
 		strncpy(groupId, argv[3], sizeof(argv[3]));
-		gettimeofday(&start, 0);
-		printf("current system time at program start = %lu\n", (((long long)start.tv_sec)*1000)+(start.tv_usec/1000)   );sleep(2);
 	}
 	else{
 		fprintf(stderr, "incorrect argument count\nUse: ./<executable_file_name> <server_name_or_ip> <username><groupId>\n"
@@ -140,6 +138,9 @@ int main(int argc, char* argv[]){
 	int i;
 	for(i = 0; i < 3; i++){
 		//send the registration packet to the server
+		gettimeofday(&start, 0);
+		printf("current system time at program start = %lu\n", (((long long)start.tv_sec)*1000)+(start.tv_usec/1000)   );
+
 		if(send(s, &registrationPacket, sizeof(registrationPacket), 0) < 0)
 		{
 			printf("\nSend failed\n");
@@ -149,6 +150,8 @@ int main(int argc, char* argv[]){
 		else{
 			printf("\nSent packet %u registration packet %i", ntohs(registrationPacket.type), i + 1); 
 			printf("\n-----------------------------------------------------\n");
+			gettimeofday(&stop, 0);
+			printf("System time after receivng packet = %lu\n", (((long long) stop.tv_sec)*1000)+(stop.tv_usec/1000)	);
 		}
 		
 	}
@@ -168,8 +171,6 @@ int main(int argc, char* argv[]){
 
 			//set server registration table index
 			serverRegTableIndex = ntohs(confirmationPacket.regTableIndex);
-			gettimeofday(&stop, 0);
-			printf("the clock time is %lu\n", (((long long)stop.tv_sec)*1000)+(stop.tv_usec/1000)	);
 	}
 
 	pthread_create(&threads[0], NULL, recvServerPackets, (void*)(intptr_t)s);//thread to listen for others in chatroom. socket is argument
