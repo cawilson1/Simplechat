@@ -7,8 +7,9 @@
 #include<stdlib.h>
 #include<sys/param.h>
 #include <unistd.h>
+#include <sys/time.h>
 
-#define SERVER_PORT 9042
+#define SERVER_PORT 9043
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -69,6 +70,7 @@ int main(int argc, char* argv[]){
 	char myMachineName[MAX_LINE];
 	char buf[MAX_LINE];
 	char arg2Username[MAX_LINE];
+	struct timeval start, stop;
 
 	pthread_t threads[1];
 	int s;
@@ -85,6 +87,8 @@ int main(int argc, char* argv[]){
 		host = argv[1];
 		strcpy(arg2Username,argv[2]);
 		strncpy(groupId, argv[3], sizeof(argv[3]));
+		gettimeofday(&start, 0);
+		printf("current system time at program start = %lu\n", (((long long)start.tv_sec)*1000)+(start.tv_usec/1000)   );sleep(2);
 	}
 	else{
 		fprintf(stderr, "incorrect argument count\nUse: ./<executable_file_name> <server_name_or_ip> <username><groupId>\n"
@@ -164,6 +168,8 @@ int main(int argc, char* argv[]){
 
 			//set server registration table index
 			serverRegTableIndex = ntohs(confirmationPacket.regTableIndex);
+			gettimeofday(&stop, 0);
+			printf("the clock time is %lu\n", (((long long)stop.tv_sec)*1000)+(stop.tv_usec/1000)	);
 	}
 
 	pthread_create(&threads[0], NULL, recvServerPackets, (void*)(intptr_t)s);//thread to listen for others in chatroom. socket is argument

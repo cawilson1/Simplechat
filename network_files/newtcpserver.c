@@ -10,7 +10,7 @@
 #include<stdint.h>
 #include <fcntl.h>
 
-#define SERVER_PORT 9042
+#define SERVER_PORT 9043
 #define MAX_LINE 256
 #define MAX_PENDING 5
 
