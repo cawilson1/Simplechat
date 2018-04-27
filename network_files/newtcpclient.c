@@ -139,7 +139,7 @@ int main(int argc, char* argv[]){
 	for(i = 0; i < 3; i++){
 		//send the registration packet to the server
 		gettimeofday(&start, 0);
-		printf("current system time at program start = %lu\n", (((long long)start.tv_sec)*1000)+(start.tv_usec/1000)   );
+		printf("current system time at program start = %lu\n", (((long long) start.tv_sec)*1000) + (start.tv_usec/1000));
 
 		if(send(s, &registrationPacket, sizeof(registrationPacket), 0) < 0)
 		{
@@ -150,8 +150,6 @@ int main(int argc, char* argv[]){
 		else{
 			printf("\nSent packet %u registration packet %i", ntohs(registrationPacket.type), i + 1); 
 			printf("\n-----------------------------------------------------\n");
-			gettimeofday(&stop, 0);
-			printf("System time after receivng packet = %lu\n", (((long long) stop.tv_sec)*1000)+(stop.tv_usec/1000)	);
 		}
 		
 	}
@@ -163,6 +161,9 @@ int main(int argc, char* argv[]){
 	}
 		//confirmation packet received without error
 		else{
+			gettimeofday(&stop, 0);
+			printf("System time after receivng packet = %lu\n", (((long long) stop.tv_sec)*1000)+(stop.tv_usec/1000)	);
+		
 			printf("\n\nConfirmation packet %u recieved successfully from server for", ntohs(confirmationPacket.type));
 			printf(" user\n%s\n", arg2Username);
 
