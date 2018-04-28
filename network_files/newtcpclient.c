@@ -261,7 +261,7 @@ void *recvServerPackets(void* arg){
 		}
 		else{
 			printf("not a valid packet type. type is %i", ntohs(chatResponsePacket.type));
-			//exit(1);
+			exit(1);
 		}
 	}	
 }
