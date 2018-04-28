@@ -8,6 +8,7 @@
 #include<sys/param.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <math.h>
 
 #define SERVER_PORT 9045
 #define MAX_LINE 256
@@ -37,9 +38,10 @@ int currentQueueIndex = 0;
 char globalMachineName[MAX_LINE];
 char globalUsername[MAX_LINE];
 char globalGroupId[MAX_LINE];
-struct timeval start, stop;
+struct timeval start, stop, initPause;
 short globalSequenceNumber = 0;
 struct rttFinder rttList[1000];//holds the rtts of up to 1000 packets
+int allSetupPacketsSentBool = 0;//don't send a/v packets until setup complete
 
 short getSequenceNumber(){
 
@@ -63,7 +65,7 @@ void printColorReset(){
 	printf("\n");
 }
 
-double findTimeListAvg(){
+short findTimeListAvg(){
 	double retVal = 0;
 	int sum = 0;
 	int i = 0;
@@ -71,7 +73,7 @@ double findTimeListAvg(){
 		sum = sum + globalAvgTimeList[i];
 		retVal = sum / 100;
 	}
-	return retVal;
+	return (short)floor(retVal);
 }
 
 int getTimeListIndex(){
@@ -93,22 +95,27 @@ void *sendPackets(void* arg){
 	int s = (intptr_t)(void*)arg;//convert arg back to int
 	
 	int i = 0;
-	long tempTimeDiff = 30;
-	long tempTimeDiff2 = 32;
+	//long tempTimeDiff = 30;
+	//long tempTimeDiff2 = 32;
 	//temporary loop for fake time
-	for(i; i < 50; i++){
-		addToTimeList(tempTimeDiff);
-		addToTimeList(tempTimeDiff2);
+	//for(i; i < 50; i++){
+	//	addToTimeList(tempTimeDiff);
+	//	addToTimeList(tempTimeDiff2);
 		//printf("send initial syncPackets here \n");
-	}
+	//}
 
-		syncPacket.type = htons(801);//packet type
-		//syncPacket.rttDelay = htons(findTimeListAvg());
-		strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
-		strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
-		strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
+	syncPacket.type = htons(801);//packet type
+	//syncPacket.rttDelay = htons(findTimeListAvg());
+	strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
+	strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
+	strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
 
-	for(i=0; i < 100; i++){
+	for(i=0; i < 150; i++){
+		//initPause.tv_nsec = 20000000;//20 ms
+		if(nanosleep((const struct timespec[]){{0,60000000L}}, NULL)<0){
+			printf("\nnanosleep failed");
+		}
+
 		short tempSeqNum = getSequenceNumber();
 		syncPacket.seqNumber = htons(tempSeqNum);
 		gettimeofday(&start, 0);
@@ -125,49 +132,60 @@ void *sendPackets(void* arg){
 			rttList[tempSeqNum] = currentRttFinder;
 			
 		}
+		//packets have been sent and given ample time to return
+		if(i >=149){
+			sleep(1);
+			allSetupPacketsSentBool=1;
+		}
 	}
 
-	printf("\ninitial avg %f", findTimeListAvg());
 	
-	while (1){
-		i = 0;
-		for(i; i < 5; i++){
-			sendDataPacket.type = htons(901);//packet type
-			sendDataPacket.rttDelay = htons(findTimeListAvg());
-			strncpy(sendDataPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
-			strncpy(sendDataPacket.uname, globalUsername, sizeof(globalUsername));//set client username
-			strncpy(sendDataPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
 
-			if(send(s, &sendDataPacket, sizeof(sendDataPacket), 0) < 0){
+	if(allSetupPacketsSentBool){
+		while (1){
+			i = 0;
+			for(i; i < 5; i++){
+				sendDataPacket.type = htons(901);//packet type
+				sendDataPacket.rttDelay = htons(findTimeListAvg());
+				strncpy(sendDataPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
+				strncpy(sendDataPacket.uname, globalUsername, sizeof(globalUsername));//set client username
+				strncpy(sendDataPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
+				//sendDataPacket.rtt = htons(findTimeListAvg());
+				printf("\n the username being sent is %s", sendDataPacket.uname);
+		
+				if(send(s, &sendDataPacket, sizeof(sendDataPacket), 0) < 0){
+					printf("\nSend failed\n");
+					exit(1);
+				}
+				else{
+					printf("\na/v data packet successfully sent with current avg rtt:%i", ntohs(sendDataPacket.rttDelay));
+				}
+				sleep(1);
+			}
+			syncPacket.type = htons(801);//packet type
+			syncPacket.rttDelay = htons(findTimeListAvg());
+			strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
+			strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
+			strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
+	
+			short tempSeqNum = getSequenceNumber();
+			syncPacket.seqNumber = htons(tempSeqNum);
+	
+			gettimeofday(&start, 0);
+			if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
 				printf("\nSend failed\n");
 				exit(1);
 			}
 			else{
-				printf("\na/v data packet successfully sent");
+				long long tempStart = (((long long) start.tv_sec)*1000)+(start.tv_usec/1000);
+				//printf("\nSystem time before sending packet = %lu", tempStart	);
+				printf("\nsync packet successfully sent with seqNumber %i. Updating rttList", ntohs(syncPacket.seqNumber));
+				currentRttFinder.seqNumber = tempSeqNum;
+				currentRttFinder.sendTime = tempStart;
+				rttList[tempSeqNum] = currentRttFinder;
+				printf("\nrtt avgerage of last 100 packets %i", findTimeListAvg());
+
 			}
-			sleep(1);
-		}
-		syncPacket.type = htons(801);//packet type
-		syncPacket.rttDelay = htons(findTimeListAvg());
-		strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
-		strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
-		strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
-
-		short tempSeqNum = getSequenceNumber();
-		syncPacket.seqNumber = htons(tempSeqNum);
-
-		gettimeofday(&start, 0);
-		if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
-			printf("\nSend failed\n");
-			exit(1);
-		}
-		else{
-			long long tempStart = (((long long) start.tv_sec)*1000)+(start.tv_usec/1000);
-			//printf("\nSystem time before sending packet = %lu", tempStart	);
-			printf("\nsync packet successfully sent with seqNumber %i. Updating rttList", ntohs(syncPacket.seqNumber));
-			currentRttFinder.seqNumber = tempSeqNum;
-			currentRttFinder.sendTime = tempStart;
-			rttList[tempSeqNum] = currentRttFinder;
 		}
 	}
 }
@@ -208,10 +226,15 @@ void *recvServerPackets(void* arg){
 			rttList[currentSeqNum].returnTime = tempStopTime;
 			short difference = calculateTimeDiff(currentSeqNum);
 			printf("\nThe time difference for packet %i is %i milliseconds.", currentSeqNum, difference);
+			addToTimeList(difference);
+			//at least 100 timing packets have been received. Now a/v packets can be sent.	
+			if(currentSeqNum >= 99){
+				allSetupPacketsSentBool = 1;
+			}
 		}
 		else{
-			printf("not a valid packet type");
-			exit(1);
+			printf("not a valid packet type. type is %i", ntohs(chatResponsePacket.type));
+			//exit(1);
 		}
 	}	
 }
@@ -220,6 +243,7 @@ void updateGlobals(char mname[MAX_LINE], char uname[MAX_LINE], char groupId[MAX_
 	strncpy(globalMachineName,mname, sizeof(mname));
 	strncpy(globalUsername,uname, sizeof(uname));
 	strncpy(globalGroupId, groupId, sizeof(groupId));
+	printf("\nlocal uname: %s, globalUsername: %s", uname, globalUsername);
 }
 
 int main(int argc, char* argv[]){
@@ -268,6 +292,9 @@ int main(int argc, char* argv[]){
 	//hostname for current client machine instance
 	gethostname(myMachineName, sizeof myMachineName);
 	printf("me: %s\n", myMachineName);
+
+	updateGlobals(myMachineName, arg2Username, groupId);
+
 
 	//create registration packet from command line args
 	registrationPacket.type = htons(121);//packet type
