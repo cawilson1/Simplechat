@@ -39,9 +39,21 @@ char globalMachineName[MAX_LINE];
 char globalUsername[MAX_LINE];
 char globalGroupId[MAX_LINE];
 struct timeval start, stop, initPause;
-short globalSequenceNumber = 0;
+short globalSequenceNumber = 0;//sequence number for sync packets
+short dataGlobalSequenceNumber = 0;//sequence number for data packets
 struct rttFinder rttList[1000];//holds the rtts of up to 1000 packets
 int allSetupPacketsSentBool = 0;//don't send a/v packets until setup complete
+int startSendingAvPackets = 0;//wait until confirmation from server to send data packets
+
+short getDataGlobalSequenceNumber(){
+	short retVal = dataGlobalSequenceNumber;
+	dataGlobalSequenceNumber = dataGlobalSequenceNumber + 1;
+	if(dataGlobalSequenceNumber >= 1000){
+		dataGlobalSequenceNumber = 0;
+	}
+
+	return retVal;
+}
 
 short getSequenceNumber(){
 
@@ -136,12 +148,23 @@ void *sendPackets(void* arg){
 		if(i >=149){
 			sleep(1);
 			allSetupPacketsSentBool=1;
+			//send packet to let server know that client is ready to start sending a/v
+			syncPacket.type = htons(501);
+			strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));
+			if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
+				printf("\nfailed to send initiate packet");
+				exit(1);
+			}
+			else{
+				printf("client has let server know that it is ready to start sending. Waiting on another client.");
+			}
 		}
 	}
 
 	
 
 	if(allSetupPacketsSentBool){
+		sleep(1);//short delay for organization
 		while (1){
 			i = 0;
 			for(i; i < 5; i++){
@@ -210,7 +233,7 @@ void *recvServerPackets(void* arg){
 			exit(1);
 		}
 
-		else if (chatResponsePacket.type == ntohs(301)){
+		else if (chatResponsePacket.type == ntohs(301)){//chat data
 			//message recieved
 			printf("\nreceived a chat data packet");
 			printGreen();
@@ -218,7 +241,7 @@ void *recvServerPackets(void* arg){
 			printf("%s", chatResponsePacket.data);//data sent
 			printColorReset();
 		}
-		else if (chatResponsePacket.type == ntohs(811)){
+		else if (chatResponsePacket.type == ntohs(811)){//received ack
 			gettimeofday(&stop, 0);
 			long long tempStopTime = (((long long) stop.tv_sec)*1000)+(stop.tv_usec/1000);
 			printf("\nReceived sync packet number %i", ntohs(chatResponsePacket.seqNumber));
@@ -231,6 +254,10 @@ void *recvServerPackets(void* arg){
 			if(currentSeqNum >= 99){
 				allSetupPacketsSentBool = 1;
 			}
+		}
+		else if (chatResponsePacket.type == ntohs(401)){//start sending av packets
+			startSendingAvPackets = 1;
+			printf("\n start sending a/v packets");
 		}
 		else{
 			printf("not a valid packet type. type is %i", ntohs(chatResponsePacket.type));
