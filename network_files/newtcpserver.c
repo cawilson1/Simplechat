@@ -10,7 +10,7 @@
 #include<stdint.h>
 #include <fcntl.h>
 
-#define SERVER_PORT 9043
+#define SERVER_PORT 9045
 #define MAX_LINE 256
 #define MAX_PENDING 5
 
@@ -22,6 +22,7 @@ struct packet{
 	short regTableIndex;
 	short seqNumber;
 	char groupId[MAX_LINE];//chat room
+	short rttDelay;
 };	
 
 struct registrationTable{
@@ -44,6 +45,7 @@ int currentSeqNum = 0;
 
 struct registrationTable tempTable;//used in join handler for adding new clients
 struct packet packetBuffer[MAX_LINE];//holds chat data to broadcast
+struct packet dataBuffer[1000];//for the data constantly sent
 short bufferIndex = 0;//specify available position in the buffer
 
 
@@ -71,7 +73,7 @@ void *chatMulticaster(){
 	struct packet broadcastPacket;//packet to send
 
 	while(1){
-		//only starts once at least one client is in the table	
+		//only starts once at least one client is in the table	n
 		while(clientInTableBool){
 			
 			//needs to be locked for entire duration of this process
@@ -79,6 +81,7 @@ void *chatMulticaster(){
 			int i, j;
 			//iterate through to the current highest used index
 			for(i = 0; i < bufferIndex; i++){
+				broadcastPacket.type = htons(301);
 				strncpy(broadcastPacket.uname, packetBuffer[i].uname, sizeof(packetBuffer[i].uname));
 				strncpy(broadcastPacket.groupId, packetBuffer[i].groupId, sizeof(packetBuffer[i].groupId));
 				strncpy(broadcastPacket.data, packetBuffer[i].data, sizeof(packetBuffer[i].data));
@@ -95,7 +98,7 @@ void *chatMulticaster(){
 							exit(1);
 						}
 						else{
-							printf("\nbroadcast packet sent to %s", registrationTableEntries[j].uname);
+							printf("\nbroadcast packet %i sent to %s", ntohs(broadcastPacket.type), registrationTableEntries[j].uname);
 						}
 					}
 				}
@@ -167,7 +170,7 @@ void *joinHandler(){
 	int new_s = tempTable.sockid;//get sockid from temporary global table
 	pthread_mutex_unlock(&my_mutex);
 	char chatRoom[MAX_LINE];//name of chatroom
-	struct packet chatDataPacket;//packet receiving data
+	struct packet chatDataPacket, syncPacket;//packet receiving data
 
 	char exitString[MAX_LINE];//if user enters this string, user exits and the thread terminates
 	strncpy(exitString, "EXIT", sizeof("EXIT"));//if user enters this string, exit
@@ -186,6 +189,7 @@ void *joinHandler(){
 			printf("\nRecieved registration packet %i\n", i + 2);
 			printf("The group ID (chatroom) for this user is %s\n", registrationPacket.groupId);
 			strncpy(chatRoom,registrationPacket.groupId,sizeof(registrationPacket.groupId));
+			
 		}
 		else{
 			//packet recieved but wrong type
@@ -221,7 +225,7 @@ void *joinHandler(){
 			exit(1);
 			}
 		//recieved chat data packet
-		else{
+		else if (htons(chatDataPacket.type)==131){
 			printf("\nChat data packet %u recieved successfully from server for: %s", ntohs(chatDataPacket.type),chatDataPacket.uname);
 			printf("\nData recieved: %s", chatDataPacket.data);
 		
@@ -239,6 +243,29 @@ void *joinHandler(){
 			bufferIndex++;
 			pthread_mutex_unlock(&bufferMutex);
 			printf("\nThe buffer was updated");		
+		}
+		//recieved constant packet data flow from client (a/v simulation)
+		else if (htons(chatDataPacket.type)==901){
+			printf("\nreceived an a/v packet");
+		}
+		//recieved a sync packet. send back to sender immediately
+		else if (htons(chatDataPacket.type)==801){
+			syncPacket.type=htons(811);
+			strncpy(syncPacket.uname, chatDataPacket.uname, sizeof(chatDataPacket.uname));	
+			syncPacket.seqNumber = chatDataPacket.seqNumber;
+			
+			
+			if(send(new_s, &syncPacket, sizeof(syncPacket), 0) < 0){
+				printf("...error sending sync packet");
+				exit(1);
+			}
+			else{
+				printf("\n...sent sync packet type %i seqNum %i back successfully", htons(syncPacket.type), htons(syncPacket.seqNumber));
+				printf("");
+			}	
+		}
+		else{
+			("\nThe data packet type %i does not match a specified data type\n", htons(chatDataPacket.type));
 		}
 	}
 	EXIT:
