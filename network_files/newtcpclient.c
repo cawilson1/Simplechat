@@ -10,7 +10,7 @@
 #include <sys/time.h>
 #include <math.h>
 
-#define SERVER_PORT 9045
+#define SERVER_PORT 8046
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -122,7 +122,8 @@ void *sendPackets(void* arg){
 	strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
 	strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
 
-	for(i=0; i < 150; i++){
+	int stay = 1;
+	for(i=0; i < 150 && stay; i++){
 		//initPause.tv_nsec = 20000000;//20 ms
 		if(nanosleep((const struct timespec[]){{0,60000000L}}, NULL)<0){
 			printf("\nnanosleep failed");
@@ -145,72 +146,77 @@ void *sendPackets(void* arg){
 			
 		}
 		//packets have been sent and given ample time to return
-		if(i >=149){
-			sleep(1);
-			allSetupPacketsSentBool=1;
-			//send packet to let server know that client is ready to start sending a/v
-			syncPacket.type = htons(501);
-			strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));
-			if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
-				printf("\nfailed to send initiate packet");
-				exit(1);
-			}
-			else{
-				printf("client has let server know that it is ready to start sending. Waiting on another client.");
-			}
+		if(i == 148){
 		}
+	}
+			//send packet to let server know that client is ready to start sending a/v
+	syncPacket.type = htons(501);
+	strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));
+
+	if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
+		printf("\nfailed to send initiate packet");
+		exit(1);
+	}
+	else{
+		printf("\nclient has let server know that it is ready to start sending. Waiting on another client.");
 	}
 
 	
 
-	if(allSetupPacketsSentBool){
-		sleep(1);//short delay for organization
-		while (1){
-			i = 0;
-			for(i; i < 5; i++){
-				sendDataPacket.type = htons(901);//packet type
-				sendDataPacket.rttDelay = htons(findTimeListAvg());
-				strncpy(sendDataPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
-				strncpy(sendDataPacket.uname, globalUsername, sizeof(globalUsername));//set client username
-				strncpy(sendDataPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
-				//sendDataPacket.rtt = htons(findTimeListAvg());
-				printf("\n the username being sent is %s", sendDataPacket.uname);
+//	allSetupPacketsSentBool=1
+
+//	if(allSetupPacketsSentBool){
+	sleep(1);//short delay for organization
+		while(1){//excuse the formatting
+			if (startSendingAvPackets){
+					printf("\n the value inside of startSendingAvPackets is %i", startSendingAvPackets);
+
+				i = 0;
+				for(i; i < 5; i++){
+					sendDataPacket.type = htons(901);//packet type
+					sendDataPacket.rttDelay = htons(findTimeListAvg());
+					strncpy(sendDataPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
+					strncpy(sendDataPacket.uname, globalUsername, sizeof(globalUsername));//set client username
+					strncpy(sendDataPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
+					//sendDataPacket.rtt = htons(findTimeListAvg());
+					printf("\n the username being sent is %s", sendDataPacket.uname);
+			
+					if(send(s, &sendDataPacket, sizeof(sendDataPacket), 0) < 0){
+						printf("\nSend failed\n");
+						exit(1);
+					}
+					else{
+						printf("\na/v data packet successfully sent with current avg rtt:%i", ntohs(sendDataPacket.rttDelay));
+					}
+					sleep(1);
+				}
+				syncPacket.type = htons(801);//packet type
+				syncPacket.rttDelay = htons(findTimeListAvg());
+				strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
+				strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
+				strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
 		
-				if(send(s, &sendDataPacket, sizeof(sendDataPacket), 0) < 0){
+				short tempSeqNum = getSequenceNumber();
+				syncPacket.seqNumber = htons(tempSeqNum);
+		
+				gettimeofday(&start, 0);
+				if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
 					printf("\nSend failed\n");
 					exit(1);
 				}
 				else{
-					printf("\na/v data packet successfully sent with current avg rtt:%i", ntohs(sendDataPacket.rttDelay));
+					long long tempStart = (((long long) start.tv_sec)*1000)+(start.tv_usec/1000);
+					//printf("\nSystem time before sending packet = %lu", tempStart	);
+					printf("\nsync packet successfully sent with seqNumber %i. Updating rttList", ntohs(syncPacket.seqNumber));
+					currentRttFinder.seqNumber = tempSeqNum;
+					currentRttFinder.sendTime = tempStart;
+					rttList[tempSeqNum] = currentRttFinder;
+					printf("\nrtt avgerage of last 100 packets %i", findTimeListAvg());
+	
 				}
-				sleep(1);
-			}
-			syncPacket.type = htons(801);//packet type
-			syncPacket.rttDelay = htons(findTimeListAvg());
-			strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
-			strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
-			strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
-	
-			short tempSeqNum = getSequenceNumber();
-			syncPacket.seqNumber = htons(tempSeqNum);
-	
-			gettimeofday(&start, 0);
-			if(send(s, &syncPacket, sizeof(syncPacket), 0) < 0){
-				printf("\nSend failed\n");
-				exit(1);
-			}
-			else{
-				long long tempStart = (((long long) start.tv_sec)*1000)+(start.tv_usec/1000);
-				//printf("\nSystem time before sending packet = %lu", tempStart	);
-				printf("\nsync packet successfully sent with seqNumber %i. Updating rttList", ntohs(syncPacket.seqNumber));
-				currentRttFinder.seqNumber = tempSeqNum;
-				currentRttFinder.sendTime = tempStart;
-				rttList[tempSeqNum] = currentRttFinder;
-				printf("\nrtt avgerage of last 100 packets %i", findTimeListAvg());
-
 			}
 		}
-	}
+//	}
 }
 
 short calculateTimeDiff(short seqNum){
@@ -255,7 +261,7 @@ void *recvServerPackets(void* arg){
 				allSetupPacketsSentBool = 1;
 			}
 		}
-		else if (chatResponsePacket.type == ntohs(401)){//start sending av packets
+		else if (ntohs(chatResponsePacket.type) == 401){//start sending av packets
 			startSendingAvPackets = 1;
 			printf("\n start sending a/v packets");
 		}
