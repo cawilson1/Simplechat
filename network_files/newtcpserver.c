@@ -10,7 +10,7 @@
 #include<stdint.h>
 #include <fcntl.h>
 
-#define SERVER_PORT 8046
+#define SERVER_PORT 8047
 #define MAX_LINE 256
 #define MAX_PENDING 5
 
@@ -34,14 +34,23 @@ struct registrationTable{
 	char groupId[MAX_LINE];//chat room that the person is in
 };
 
+struct rttTracker{
+	int sockId;//to keep track of the individual client
+	int avgRtt;//explicitly given
+	int bufferDelayTime;//calculated
+	int entryExistsBool;
+};
+
 struct packet registrationPacket, confirmationPacket;
 struct registrationTable registrationTableEntries[10];
+struct rttTracker trackerList[3];
 
-pthread_t threads[3];
+pthread_t threads[4];
 int clientInTableBool = 0;//as soon as 1 or more clients have joined, multicasting starts
 pthread_mutex_t my_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t bufferMutex = PTHREAD_MUTEX_INITIALIZER;//for the buffer table
 int currentSeqNum = 0;
+int maxTime;//one half an rtt from the two clients furthest from the server
 
 struct registrationTable tempTable;//used in join handler for adding new clients
 struct packet packetBuffer[MAX_LINE];//holds chat data to broadcast
@@ -68,6 +77,76 @@ void printRegistrationTable(int index){
 	printf("\n-----------------------------------------------------------------------\n");
 }
 
+
+//constantly calculate and update the delay times for each client
+//keeps track of longest 2 rtts and max
+void *delayCalculator(){
+
+	struct packet bufferPacket;//specifies time to tell client to buffer
+	struct rttTracker longest[2];//first element is furthest rtt from server, second element is second furthest
+	longest[0].entryExistsBool = 0; longest[1].entryExistsBool = 0;
+	int iterationCheckerPrev = 0;//increments after each iteration. 
+	int iterationCheckerFut = 0;
+
+	while(1){
+		if(clientsReadyToCom>2){
+			sleep(1);
+			int i = 0;
+			for(i; i < 3; i++){
+				if(trackerList[i].entryExistsBool == 1){
+					if(longest[0].entryExistsBool == 0){
+						longest[0] = trackerList[i];
+						longest[0].entryExistsBool == 1;
+					}
+					else if(longest[1].entryExistsBool == 0){
+						if(trackerList[i].avgRtt > longest[0].avgRtt){
+							longest[1] = longest[0];
+							longest[0] = trackerList[i];
+						}
+						else{
+							longest[1] = trackerList[i];
+						}
+					}
+					else{//the list already has elements
+						if(trackerList[i].sockId != longest[0].sockId && (trackerList[i].avgRtt > longest[0].avgRtt)){
+							longest[1] = longest[0];
+							longest[0] = trackerList[i];
+						}
+						else if(trackerList[i].sockId != longest[1].sockId && trackerList[i].sockId != longest[0].sockId && (trackerList[i].avgRtt > longest[1].avgRtt)){
+							longest[1] = trackerList[i];
+						}
+					}
+					//printf("\nthe sockid %i has rtt %i", trackerList[i].sockId, trackerList[i].avgRtt);
+				}
+			}
+			maxTime = longest[0].avgRtt + longest[1].avgRtt;
+			printf("\nthe max time is %i, and the longest are %i and %i", maxTime, longest[0].avgRtt, longest[1].avgRtt);
+			//send 2 999 packets to each client telling them how long to buffer each client
+			int j;
+			for(i = 0; i < 3; i++){
+				for(j = 0; j < 3; j++){
+					if(i != j){//it is a different client
+						short bufferTime = maxTime - ((trackerList[i].avgRtt + trackerList[j].avgRtt)/2);
+						printf("\nthe buffer time for client with sockid %i for packets to client with sockid %i is: %i ms", trackerList[i].sockId, trackerList[j].sockId, bufferTime);
+							bufferPacket.type = htons(999);
+							bufferPacket.rttDelay = htons(bufferTime);
+							bufferPacket.seqNumber = htons(trackerList[i].sockId);//for laziness store sockid in seq num
+							if(send(trackerList[i].sockId, &bufferPacket, sizeof(bufferPacket), 0) < 0){
+								printf("\nfailed to send buffer packet");
+							exit(1);
+						}
+						else{
+							printf("\nbuffer time packet sent");
+						}
+					}
+				}
+			}
+			sleep(9);
+		}
+	}
+
+}
+
 //iterates through buffer and sends each message to all clients in same room
 void *chatMulticaster(){
 			
@@ -91,7 +170,7 @@ void *chatMulticaster(){
 					//this entry is in the same chat room that the buffered message should be sent to
 					if(registrationTableEntries[j].entryExistsBool == 1 && (strcmp(registrationTableEntries[j].groupId,broadcastPacket.groupId)==0)){
 						pthread_mutex_lock(&my_mutex);
-						//get socket for this entry						
+						//get socket for this entry
 						int new_s = registrationTableEntries[j].sockid;
 						pthread_mutex_unlock(&my_mutex);
 						if(send(new_s, &broadcastPacket, sizeof(broadcastPacket), 0) < 0){
@@ -187,6 +266,43 @@ void *initPacket(void* arg){
 
 }
 
+
+//finds the first available index (unused slot) in the trackerList
+int handleDelayList(int new_s, int avgRttDelay){
+	
+	int firstAvailableIndex = -1;//initialize
+	int i = 0;
+	//length of trackerList is 3
+	for(i; i < 3;i++){
+		//entry exists is false
+		if(trackerList[i].entryExistsBool == 0){
+			firstAvailableIndex = i;
+			goto NewItem;
+		}
+		else{
+			if(trackerList[i].sockId == new_s){
+				trackerList[i].avgRtt = avgRttDelay;
+				goto LeaveLoop;
+			}
+		}
+	}
+		//here update table to hold the newest addition
+	if(firstAvailableIndex==-1){
+		printf("\nthe table is full");
+		exit(1);
+	}
+
+	//actually update here
+	NewItem:
+		trackerList[i].sockId = new_s;
+		trackerList[i].avgRtt = avgRttDelay;
+		trackerList[i].entryExistsBool = 1;
+
+	LeaveLoop:
+
+	return firstAvailableIndex;
+}
+
 void *joinHandler(){
 	int currentRegTableIndex = 0;//so this thread always has this clients index in reg table
 	pthread_mutex_lock(&my_mutex);
@@ -244,7 +360,6 @@ void *joinHandler(){
 
 
 	//constantly check for new packet data and update buffer if found
-	//this neeeds to be in its own new thread
 	pthread_create(&threads[2], NULL, initPacket, (void*)(intptr_t)new_s);
 
 	while(1){
@@ -274,25 +389,15 @@ void *joinHandler(){
 		}
 		//recieved constant packet data flow from client (a/v simulation)
 		else if (htons(chatDataPacket.type)==901){
-			printf("\nreceived an a/v packet from %s", chatDataPacket.uname);
+			printf("\nreceived an a/v packet from %s with average RTT delay of %i", chatDataPacket.uname, ntohs(chatDataPacket.rttDelay));
+			handleDelayList(new_s, ntohs(chatDataPacket.rttDelay));
 		}
 		//recieved a sync packet. send back to sender immediately
 		else if (htons(chatDataPacket.type)==801){
 			syncPacket.type=htons(811);
 			strncpy(syncPacket.uname, chatDataPacket.uname, sizeof(chatDataPacket.uname));	
 			syncPacket.seqNumber = chatDataPacket.seqNumber;
-			
 
-		//	if(syncPacket.seqNumber == ntohs(401){
-		//		if(send(new_s, &syncPacket, sizeof(syncPacket), 0) < 0){
-		//			printf("...error sending start av packets");
-		//			exit(1);
-		//		}
-		//		else{
-		//			printf("send the message to start sending av packets here");
-		//		}
-		//	}
-			
 			if(send(new_s, &syncPacket, sizeof(syncPacket), 0) < 0){
 				printf("...error sending sync packet");
 				exit(1);
@@ -350,6 +455,8 @@ int main(int argc, char* argv[])
 
 	//create multicaster thread
 	pthread_create(&threads[1], NULL, chatMulticaster, NULL);
+	//create thread to calculate delays
+	pthread_create(&threads[3], NULL, delayCalculator, NULL);
 	printf("Waiting for connection...\n");
 
 
