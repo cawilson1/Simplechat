@@ -10,7 +10,7 @@
 #include <sys/time.h>
 #include <math.h>
 
-#define SERVER_PORT 8046
+#define SERVER_PORT 8047
 #define MAX_LINE 256
 
 #define GREEN   "\x1B[32m"
@@ -107,17 +107,8 @@ void *sendPackets(void* arg){
 	int s = (intptr_t)(void*)arg;//convert arg back to int
 	
 	int i = 0;
-	//long tempTimeDiff = 30;
-	//long tempTimeDiff2 = 32;
-	//temporary loop for fake time
-	//for(i; i < 50; i++){
-	//	addToTimeList(tempTimeDiff);
-	//	addToTimeList(tempTimeDiff2);
-		//printf("send initial syncPackets here \n");
-	//}
 
 	syncPacket.type = htons(801);//packet type
-	//syncPacket.rttDelay = htons(findTimeListAvg());
 	strncpy(syncPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
 	strncpy(syncPacket.uname, globalUsername, sizeof(globalUsername));//set client username
 	strncpy(syncPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
@@ -161,12 +152,7 @@ void *sendPackets(void* arg){
 		printf("\nclient has let server know that it is ready to start sending. Waiting on another client.");
 	}
 
-	
-
-//	allSetupPacketsSentBool=1
-
-//	if(allSetupPacketsSentBool){
-	sleep(1);//short delay for organization
+		sleep(1);//short delay for organization
 		while(1){//excuse the formatting
 			if (startSendingAvPackets){
 					printf("\n the value inside of startSendingAvPackets is %i", startSendingAvPackets);
@@ -178,7 +164,7 @@ void *sendPackets(void* arg){
 					strncpy(sendDataPacket.mname, globalMachineName, sizeof(globalMachineName));//set client machine name
 					strncpy(sendDataPacket.uname, globalUsername, sizeof(globalUsername));//set client username
 					strncpy(sendDataPacket.groupId, globalGroupId, sizeof(globalGroupId));//set chatroom name
-					//sendDataPacket.rtt = htons(findTimeListAvg());
+					
 					printf("\n the username being sent is %s", sendDataPacket.uname);
 			
 					if(send(s, &sendDataPacket, sizeof(sendDataPacket), 0) < 0){
@@ -206,7 +192,6 @@ void *sendPackets(void* arg){
 				}
 				else{
 					long long tempStart = (((long long) start.tv_sec)*1000)+(start.tv_usec/1000);
-					//printf("\nSystem time before sending packet = %lu", tempStart	);
 					printf("\nsync packet successfully sent with seqNumber %i. Updating rttList", ntohs(syncPacket.seqNumber));
 					currentRttFinder.seqNumber = tempSeqNum;
 					currentRttFinder.sendTime = tempStart;
@@ -248,6 +233,9 @@ void *recvServerPackets(void* arg){
 			printColorReset();
 		}
 		else if (chatResponsePacket.type == ntohs(811)){//received ack
+			//if(nanosleep((const struct timespec[]){{0,30000000L}}, NULL)<0){
+				//for the client with artificial delay. Compile with diff name and comment this out	
+//			}
 			gettimeofday(&stop, 0);
 			long long tempStopTime = (((long long) stop.tv_sec)*1000)+(stop.tv_usec/1000);
 			printf("\nReceived sync packet number %i", ntohs(chatResponsePacket.seqNumber));
@@ -260,6 +248,9 @@ void *recvServerPackets(void* arg){
 			if(currentSeqNum >= 99){
 				allSetupPacketsSentBool = 1;
 			}
+		}
+		else if(ntohs(chatResponsePacket.type) == 999){//print the buffer time
+			printf("\nthe buffer time from here to host with socket id %i is %i ms", ntohs(chatResponsePacket.seqNumber), ntohs(chatResponsePacket.rttDelay));
 		}
 		else if (ntohs(chatResponsePacket.type) == 401){//start sending av packets
 			startSendingAvPackets = 1;
@@ -384,9 +375,6 @@ int main(int argc, char* argv[]){
 	}
 		//confirmation packet received without error
 		else{
-			//gettimeofday(&stop, 0);
-			//printf("System time after receivng packet = %lu\n", (((long long) stop.tv_sec)*1000)+(stop.tv_usec/1000)	);
-			//for now hard code this for each client
 			long tempStop = (((long long) start.tv_sec)*1000) + (start.tv_usec/1000) + 30;
 			printf("System time after receiving packet = %lu\n", tempStop);	
 
