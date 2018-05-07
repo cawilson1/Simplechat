@@ -256,6 +256,9 @@ void *recvServerPackets(void* arg){
 			startSendingAvPackets = 1;
 			printf("\n start sending a/v packets");
 		}
+		else if (ntohs(chatResponsePacket.type) == 0){//server side error for creating proper header
+			printf("\nPACKET RECEIVED WITH ERROR AND A HEADER OF 0");
+		}
 		else{
 			printf("not a valid packet type. type is %i", ntohs(chatResponsePacket.type));
 			exit(1);
